@@ -4,6 +4,7 @@ import http from "../api/http";
 import Card from "../components/Card";
 
 const WEEK_DAYS = ["Pon", "Uto", "Sre", "Čet", "Pet", "Sub", "Ned"];
+const GOOGLE_CHARTS_SRC = "https://www.gstatic.com/charts/loader.js";
 
 function toKey(date) {
   const y = date.getFullYear();
@@ -22,8 +23,8 @@ function isSameDate(a, b) {
 
 function startOfWeek(date) {
   const d = new Date(date);
-  const day = d.getDay(); 
-  const diff = (day + 6) % 7; 
+  const day = d.getDay();
+  const diff = (day + 6) % 7;
   d.setDate(d.getDate() - diff);
   d.setHours(0, 0, 0, 0);
   return d;
@@ -68,6 +69,44 @@ function getMonthGrid(date) {
   });
 }
 
+function useGoogleCharts(enabled) {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    if (window.google?.charts) {
+      window.google.charts.load("current", { packages: ["corechart"] });
+      window.google.charts.setOnLoadCallback(() => setReady(true));
+      return;
+    }
+
+    const existingScript = document.querySelector(
+      `script[src="${GOOGLE_CHARTS_SRC}"]`
+    );
+
+    const onLoaded = () => {
+      window.google.charts.load("current", { packages: ["corechart"] });
+      window.google.charts.setOnLoadCallback(() => setReady(true));
+    };
+
+    if (existingScript) {
+      existingScript.addEventListener("load", onLoaded);
+      return () => existingScript.removeEventListener("load", onLoaded);
+    }
+
+    const script = document.createElement("script");
+    script.src = GOOGLE_CHARTS_SRC;
+    script.async = true;
+    script.addEventListener("load", onLoaded);
+    document.body.appendChild(script);
+
+    return () => script.removeEventListener("load", onLoaded);
+  }, [enabled]);
+
+  return ready;
+}
+
 export default function Pocetna() {
   const { user } = useAuth();
   const isAdmin = user?.uloga === "ADMIN";
@@ -80,9 +119,13 @@ export default function Pocetna() {
   });
 
   const [calendarData, setCalendarData] = useState([]);
-  const [calendarConnected, setCalendarConnected] = useState(false);
   const [focusDate, setFocusDate] = useState(new Date());
   const [todayMeta, setTodayMeta] = useState(null);
+
+  const [statsRows, setStatsRows] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
+  const chartsReady = useGoogleCharts(isAdmin);
 
   useEffect(() => {
     if (!user?.uloga) return;
@@ -121,15 +164,31 @@ export default function Pocetna() {
       try {
         const res = await http.get("/kalendar/rokovi");
         setCalendarData(res.data?.data || []);
-        setCalendarConnected(Boolean(res.data?.meta?.external_calendar_connected));
         setTodayMeta(res.data?.meta?.today || null);
       } catch {
         setCalendarData([]);
-        setCalendarConnected(false);
         setTodayMeta(null);
       }
     })();
   }, [showCalendar]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    (async () => {
+      try {
+        setStatsLoading(true);
+        setStatsError("");
+        const res = await http.get("/statistika/mesecno");
+        setStatsRows(Array.isArray(res.data) ? res.data : []);
+      } catch {
+        setStatsRows([]);
+        setStatsError("Neuspešno učitavanje statistike.");
+      } finally {
+        setStatsLoading(false);
+      }
+    })();
+  }, [isAdmin]);
 
   const todayLabel = useMemo(() => {
     if (todayMeta?.day_name && todayMeta?.date) {
@@ -158,7 +217,9 @@ export default function Pocetna() {
     });
 
     map.forEach((list) => {
-      list.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+      list.sort(
+        (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
+      );
     });
 
     return map;
@@ -168,6 +229,87 @@ export default function Pocetna() {
     month: "long",
     year: "numeric",
   });
+
+  const predajeRows = useMemo(
+    () => statsRows.map((item) => [item.mesec, item.broj_predaja]),
+    [statsRows]
+  );
+
+  const oceneRows = useMemo(
+    () => statsRows.map((item) => [item.mesec, item.prosecna_ocena]),
+    [statsRows]
+  );
+
+  useEffect(() => {
+    if (
+      !isAdmin ||
+      !chartsReady ||
+      statsLoading ||
+      statsError ||
+      !statsRows.length
+    )
+      return;
+
+    const predajeContainer = document.getElementById(
+      "admin-broj-predaja-chart"
+    );
+    const oceneContainer = document.getElementById("admin-prosek-ocena-chart");
+    if (!predajeContainer || !oceneContainer) return;
+
+    const predajeData = window.google.visualization.arrayToDataTable([
+      ["Mesec", "Broj predaja"],
+      ...predajeRows,
+    ]);
+
+    const oceneData = window.google.visualization.arrayToDataTable([
+      ["Mesec", "Prosek ocena"],
+      ...oceneRows,
+    ]);
+
+    const predajeOptions = {
+      title: "Broj predaja po mesecima",
+      legend: { position: "none" },
+      height: 360,
+      vAxis: { title: "Broj predaja", minValue: 0 },
+      colors: ["#4285F4"],
+    };
+
+    const oceneOptions = {
+      title: "Prosečna ocena po mesecima",
+      legend: { position: "none" },
+      height: 360,
+      vAxis: { title: "Prosečna ocena", viewWindow: { min: 5, max: 10 } },
+      curveType: "function",
+      pointSize: 6,
+      colors: ["#DB4437"],
+    };
+
+    const predajeChart = new window.google.visualization.ColumnChart(
+      predajeContainer
+    );
+    const oceneChart = new window.google.visualization.LineChart(
+      oceneContainer
+    );
+
+    predajeChart.draw(predajeData, predajeOptions);
+    oceneChart.draw(oceneData, oceneOptions);
+
+    const onResize = () => {
+      predajeChart.draw(predajeData, predajeOptions);
+      oceneChart.draw(oceneData, oceneOptions);
+    };
+
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [
+    isAdmin,
+    chartsReady,
+    predajeRows,
+    oceneRows,
+    statsLoading,
+    statsError,
+    statsRows.length,
+  ]);
 
   return (
     <div style={{ padding: 16, display: "grid", gap: 12 }}>
@@ -196,7 +338,9 @@ export default function Pocetna() {
           <div style={{ fontSize: 13, color: "#555" }}>
             {isAdmin ? "Predmeti" : "Moji predmeti"}
           </div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>{counts.predmeti}</div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>
+            {counts.predmeti}
+          </div>
         </Card>
 
         <Card>
@@ -210,9 +354,39 @@ export default function Pocetna() {
           <div style={{ fontSize: 13, color: "#555" }}>
             {isAdmin ? "Predaje" : "Moje predaje"}
           </div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>{counts.predaje}</div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>
+            {counts.predaje}
+          </div>
         </Card>
       </div>
+
+      {isAdmin && (
+        <Card>
+          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Mesečna statistika</h3>
+          <p style={{ marginTop: 0 }}>
+            Broj predaja i prosečna ocena po mesecima.
+          </p>
+
+          {statsLoading && <p>Učitavanje statistike...</p>}
+          {!statsLoading && statsError && <p>{statsError}</p>}
+          {!statsLoading && !statsError && !statsRows.length && (
+            <p>Za sada nema podataka za prikaz.</p>
+          )}
+
+          {!statsLoading && !statsError && statsRows.length > 0 && (
+            <>
+              <div
+                id="admin-broj-predaja-chart"
+                style={{ width: "100%", minHeight: 360, marginBottom: 24 }}
+              />
+              <div
+                id="admin-prosek-ocena-chart"
+                style={{ width: "100%", minHeight: 360 }}
+              />
+            </>
+          )}
+        </Card>
+      )}
 
       {showCalendar && (
         <Card>
@@ -232,7 +406,9 @@ export default function Pocetna() {
               <button
                 type="button"
                 onClick={() =>
-                  setFocusDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+                  setFocusDate(
+                    (prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
+                  )
                 }
               >
                 ← Prethodni
@@ -245,7 +421,9 @@ export default function Pocetna() {
               <button
                 type="button"
                 onClick={() =>
-                  setFocusDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+                  setFocusDate(
+                    (prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
+                  )
                 }
               >
                 Sledeći →
@@ -260,10 +438,6 @@ export default function Pocetna() {
           <div style={{ fontSize: 14, color: "#333", marginBottom: 8 }}>
             Danas je: <b style={{ textTransform: "capitalize" }}>{todayLabel}</b>
           </div>
-
-         {/*  <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>
-            Integracija sa eksternim kalendarom: {calendarConnected ? "aktivna" : "nije podešena"}
-          </div> */}
 
           <div
             style={{
@@ -335,7 +509,9 @@ export default function Pocetna() {
                             borderRadius: 6,
                           }}
                         >
-                          <div style={{ fontWeight: 600, lineHeight: 1.2 }}>{event.title}</div>
+                          <div style={{ fontWeight: 600, lineHeight: 1.2 }}>
+                            {event.title}
+                          </div>
                           {rokTekst && <div style={{ color: "#555" }}>{rokTekst}</div>}
                         </div>
                       );
@@ -354,12 +530,6 @@ export default function Pocetna() {
         </Card>
       )}
 
-      <Card>
-        <div style={{ fontSize: 14, color: "#444" }}>
-          Ova aplikacija koristi REST API + Sanctum Bearer token. Prikaz podataka je filtriran po ulozi
-          (student/profesor/admin).
-        </div>
-      </Card>
     </div>
   );
 }

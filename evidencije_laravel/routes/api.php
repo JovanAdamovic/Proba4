@@ -10,6 +10,7 @@ use App\Http\Controllers\PredajaController;
 use App\Http\Controllers\ProveraPlagijataController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\KalendarController;
+use App\Http\Controllers\StatistikaController;
 
 
 Route::controller(AuthController::class)->group(function () {
@@ -30,6 +31,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/predaje/za-moje-predmete', [PredajaController::class, 'zaMojePredmete']); 
 
     Route::get('/kalendar/rokovi', [KalendarController::class, 'rokovi']);
+    Route::get('/statistika/mesecno', [StatistikaController::class, 'mesecno']);
+
 
     Route::get('/predmeti', [PredmetController::class, 'index']);
     Route::get('/predmeti/{id}', [PredmetController::class, 'show']);
