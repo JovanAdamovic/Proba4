@@ -182,7 +182,7 @@
                 "tags": [
                     "Kalendar"
                 ],
-                "summary": "Lista rokova zadataka i državnih praznika (Nager.Date API)",
+                "summary": "Lista rokova zadataka i državnih praznika",
                 "operationId": "452f4fc5cdf619bbb0d3172aea0470b4",
                 "responses": {
                     "200": {
@@ -1167,6 +1167,54 @@
                 ]
             }
         },
+        "/api/statistika/mesecno": {
+            "get": {
+                "tags": [
+                    "Statistika"
+                ],
+                "summary": "Mesečna statistika predaja i prosečne ocene.",
+                "operationId": "8a27e4585308558e2bb096dffa2293e7",
+                "responses": {
+                    "200": {
+                        "description": "Uspešno vraćena mesečna statistika",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "properties": {
+                                            "mesec": {
+                                                "type": "string",
+                                                "example": "2026-03"
+                                            },
+                                            "broj_predaja": {
+                                                "type": "integer",
+                                                "example": 12
+                                            },
+                                            "prosecna_ocena": {
+                                                "type": "number",
+                                                "format": "float",
+                                                "example": 8.25,
+                                                "nullable": true
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Neautorizovan pristup"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/upisi": {
             "get": {
                 "tags": [
@@ -1877,6 +1925,10 @@
         {
             "name": "Provere plagijata",
             "description": "Provere plagijata"
+        },
+        {
+            "name": "Statistika",
+            "description": "Statistika"
         },
         {
             "name": "Upisi",
